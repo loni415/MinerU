@@ -27,6 +27,14 @@ dist/
 
 .DS_Store
 .env
+lukas_files
+MinerU copy.ipynb
+MinerU_copy_colab.ipynb
+mineru_v2.ipynb
+magic-html_1.ipynb
+magic-pdf_bu.json
+lukas_files/
+
 
 bad_words/
 bak/
