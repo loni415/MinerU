@@ -192,6 +192,42 @@ A WebUI developed based on Gradio, with a simple interface and only core parsing
 
 ### Install MinerU
 
+#### Quick Install using Installation Scripts (Recommended)
+
+We provide automated installation scripts that simplify the setup process:
+
+**Linux / macOS:**
+```bash
+# Using Python script (interactive)
+python3 install_mineru.py
+
+# Or using bash script (quick install)
+bash install_mineru.sh
+
+# One-line installation
+curl -sSL https://raw.githubusercontent.com/opendatalab/MinerU/master/install_mineru.sh | bash
+```
+
+**Windows:**
+```powershell
+# Using Python script (interactive)
+python install_mineru.py
+
+# Or using PowerShell script
+powershell -ExecutionPolicy Bypass -File install_mineru.ps1
+```
+
+The installation scripts will:
+- Check system requirements and Python version
+- Install dependencies (pip, uv)
+- Install MinerU with optimal settings for your platform
+- Verify the installation
+- Provide usage instructions
+
+See [INSTALL.md](INSTALL.md) for detailed installation options and troubleshooting.
+
+---
+
 #### Install MinerU using pip or uv
 ```bash
 pip install --upgrade pip

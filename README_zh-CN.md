@@ -194,6 +194,42 @@ https://github.com/user-attachments/assets/4bea02c9-6d54-4cd6-97ed-dff14340982c
 
 ### 安装 MinerU
 
+#### 使用安装脚本快速安装（推荐）
+
+我们提供了自动化安装脚本来简化安装过程：
+
+**Linux / macOS：**
+```bash
+# 使用Python脚本（交互式）
+python3 install_mineru.py
+
+# 或使用bash脚本（快速安装）
+bash install_mineru.sh
+
+# 一键安装
+curl -sSL https://raw.githubusercontent.com/opendatalab/MinerU/master/install_mineru.sh | bash
+```
+
+**Windows：**
+```powershell
+# 使用Python脚本（交互式）
+python install_mineru.py
+
+# 或使用PowerShell脚本
+powershell -ExecutionPolicy Bypass -File install_mineru.ps1
+```
+
+安装脚本将会：
+- 检查系统要求和Python版本
+- 安装依赖项（pip、uv）
+- 根据您的平台安装MinerU及最优配置
+- 验证安装
+- 提供使用说明
+
+详细的安装选项和故障排除请参阅 [INSTALL.md](INSTALL.md)。
+
+---
+
 #### 使用pip或uv安装MinerU
 ```bash
 pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple
