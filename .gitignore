@@ -54,6 +54,7 @@ debug_utils/
 
 # sphinx docs
 _build/
-
-
+notes.md
+inputs/
 output/
+.gitignore
