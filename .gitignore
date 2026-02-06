@@ -27,7 +27,8 @@ dist/
 
 .DS_Store
 .env
-
+inputs/
+output/
 
 
 bad_words/
