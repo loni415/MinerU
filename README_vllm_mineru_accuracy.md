@@ -42,7 +42,15 @@ Use hybrid mode when PDFs are not OCR’d or are image scans:
 
 Use full-precision or bfloat16 weights with an fp16 KV cache. Avoid quantization if memory allows, since it can reduce layout and text fidelity.
 
-### Recommended vLLM Docker command
+### Model selection guidance
+
+- **Qwen/Qwen2.5-14B-Instruct (BF16/FP16)**: Best accuracy/consistency if you can afford the VRAM. Prefer this for maximum layout fidelity.
+- **Qwen/Qwen2.5-14B-Instruct-AWQ**: Lower VRAM, slightly more layout errors and minor text drift. Use if you must fit into a tighter memory budget.
+- **Qwen/Qwen2.5-32B-Instruct-AWQ**: Often improves reasoning and long-document coherence over 14B-AWQ, but still carries quantization artifacts. Requires substantially more VRAM even with AWQ; plan on lower max context or multiple GPUs.
+
+If absolute accuracy is the top priority, choose the non-quantized 14B. If you can host 32B in BF16 on multi-GPU, it can outperform 14B, but that is typically beyond a single 5090.
+
+### Recommended vLLM Docker command (14B BF16)
 
 ```bash
 sudo docker run -d --gpus all --ipc=host --name vllm-qwen2.5-14b \
@@ -62,7 +70,41 @@ sudo docker run -d --gpus all --ipc=host --name vllm-qwen2.5-14b \
 - **fp16 KV cache** preserves detail in long documents.
 - **Long context (32k)** helps with long multi-page PDFs.
 
-If you must quantize, `AWQ` works but may slightly reduce accuracy on complex layouts.
+### AWQ variant (14B)
+
+```bash
+sudo docker run -d --gpus all --ipc=host --name vllm-qwen2.5-14b-awq \
+  -v /home/user/.cache/huggingface:/root/.cache/huggingface \
+  -p 8000:8000 \
+  vllm/vllm-openai:latest \
+  Qwen/Qwen2.5-14B-Instruct-AWQ \
+  --dtype half \
+  --kv-cache-dtype fp16 \
+  --gpu-memory-utilization 0.92 \
+  --max-model-len 24576 \
+  --trust-remote-code
+```
+
+### AWQ variant (32B)
+
+```bash
+sudo docker run -d --gpus all --ipc=host --name vllm-qwen2.5-32b-awq \
+  -v /home/user/.cache/huggingface:/root/.cache/huggingface \
+  -p 8000:8000 \
+  vllm/vllm-openai:latest \
+  Qwen/Qwen2.5-32B-Instruct-AWQ \
+  --dtype half \
+  --kv-cache-dtype fp16 \
+  --gpu-memory-utilization 0.92 \
+  --max-model-len 16384 \
+  --trust-remote-code
+```
+
+**Notes on flags**
+- `--gpu-memory-utilization` controls how much VRAM vLLM is allowed to use; raise slightly for AWQ to reclaim headroom.
+- `--max-model-len` should be reduced if you see OOMs; AWQ 32B typically needs a shorter context on a single GPU.
+- `--dtype half` is standard for AWQ weights.
+- Add `--tensor-parallel-size N` when using multiple GPUs.
 
 ## Fonts and System Packages
 
@@ -95,7 +137,8 @@ sudo apt install -y fonts-noto-color-emoji fonts-liberation
 - MinerU backend: `-b vlm`
 - Model selection: `-m auto`
 - Language: `-l en` or `-l en,zh`
-- vLLM: `Qwen/Qwen2.5-14B-Instruct`, `--dtype bfloat16`, `--kv-cache-dtype fp16`
-- Max context length: `32768`
+- vLLM (accuracy-first): `Qwen/Qwen2.5-14B-Instruct`, `--dtype bfloat16`, `--kv-cache-dtype fp16`
+- vLLM (memory-first): `Qwen/Qwen2.5-14B-Instruct-AWQ`, `--dtype half`
+- Max context length: `32768` (reduce if you move to AWQ or larger models)
 
 These settings prioritize accuracy for complex academic PDFs at the expense of speed and GPU memory.
