@@ -1,0 +1,14 @@
+{
+  "llm_openai": {
+    "api_key": "token",
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-VL-32B-Instruct-AWQ"
+  },
+  "layout-config": {
+    "model": "doclayout_yolo" 
+  },
+  "formula-config": {
+    "mfd_model": "yolo_v8_mfd",
+    "mfr_model": "unimernet_small"
+  }
+}
