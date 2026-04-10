@@ -3,6 +3,7 @@ import atexit
 import json
 import mimetypes
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -34,6 +35,7 @@ TASK_RESULT_TIMEOUT_SECONDS = 3600
 LOCAL_API_SHUTDOWN_TIMEOUT_SECONDS = 10
 LOCAL_API_CLEANUP_RETRIES = 8
 LOCAL_API_CLEANUP_RETRY_INTERVAL_SECONDS = 0.25
+PROCESS_TREE_CLEANUP_GRACE_SECONDS = 0.1
 
 
 def get_float_env(name: str, default: float, minimum: float = 0.0) -> float:
@@ -73,6 +75,113 @@ def get_local_api_startup_timeout_seconds(default: float = 300.0) -> float:
 LOCAL_API_STARTUP_TIMEOUT_SECONDS = get_local_api_startup_timeout_seconds()
 
 
+def build_managed_process_popen_kwargs() -> dict[str, object]:
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if creationflags:
+            return {"creationflags": creationflags}
+        return {}
+    return {"start_new_session": True}
+
+
+def _signal_process_tree(process: subprocess.Popen[bytes], *, force: bool) -> None:
+    if os.name == "nt":
+        command = ["taskkill", "/PID", str(process.pid), "/T"]
+        if force:
+            command.append("/F")
+        try:
+            subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Failed to signal managed MinerU process tree {} on Windows: {}",
+                process.pid,
+                exc,
+            )
+        return
+
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        logger.debug(
+            "Failed to signal managed MinerU process group {}: {}",
+            process.pid,
+            exc,
+        )
+
+
+def cleanup_process_tree_descendants(
+    process: subprocess.Popen[bytes],
+    *,
+    grace_seconds: float = PROCESS_TREE_CLEANUP_GRACE_SECONDS,
+) -> None:
+    if os.name == "nt":
+        return
+
+    _signal_process_tree(process, force=False)
+    if grace_seconds > 0:
+        time.sleep(grace_seconds)
+    _signal_process_tree(process, force=True)
+
+
+def stop_managed_process(
+    process: subprocess.Popen[bytes] | None,
+    *,
+    shutdown_timeout_seconds: float,
+    use_stdin_shutdown_watcher: bool,
+) -> None:
+    if process is None:
+        return
+
+    was_running_at_entry = process.poll() is None
+    exited_via_stdin_eof = False
+    tree_signaled = False
+
+    if not was_running_at_entry:
+        return
+
+    if use_stdin_shutdown_watcher:
+        if process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
+        try:
+            process.wait(timeout=shutdown_timeout_seconds)
+            exited_via_stdin_eof = True
+        except subprocess.TimeoutExpired:
+            logger.debug(
+                "Managed MinerU process did not stop after stdin EOF within {}s. Falling back to process-tree termination.",
+                shutdown_timeout_seconds,
+            )
+
+    if process.poll() is None:
+        _signal_process_tree(process, force=False)
+        tree_signaled = True
+        try:
+            process.wait(timeout=shutdown_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+
+    if process.poll() is None:
+        _signal_process_tree(process, force=True)
+        tree_signaled = True
+        try:
+            process.wait(timeout=shutdown_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Managed MinerU process {} did not exit after forceful stop.",
+                process.pid,
+            )
+
+    if exited_via_stdin_eof and not tree_signaled:
+        cleanup_process_tree_descendants(process)
+
+
 @dataclass(frozen=True)
 class UploadAsset:
     path: Path
@@ -110,6 +219,10 @@ class LocalAPIServer:
         self.process: subprocess.Popen[bytes] | None = None
         self._atexit_registered = False
         self.extra_cli_args = tuple(extra_cli_args)
+        # On Windows, the temporary FastAPI child process can stall during parsing
+        # startup when launched with stdin=PIPE and an EOF-based shutdown watcher.
+        # Use explicit process termination there instead of stdin-driven shutdown.
+        self._use_stdin_shutdown_watcher = os.name != "nt"
 
     def start(self) -> str:
         if self.process is not None:
@@ -124,7 +237,12 @@ class LocalAPIServer:
             read_max_concurrent_requests(default=DEFAULT_MAX_CONCURRENT_REQUESTS)
         )
         env["MINERU_API_DISABLE_ACCESS_LOG"] = "1"
-        env["MINERU_API_SHUTDOWN_ON_STDIN_EOF"] = "1"
+        if self._use_stdin_shutdown_watcher:
+            env["MINERU_API_SHUTDOWN_ON_STDIN_EOF"] = "1"
+            stdin_target = subprocess.PIPE
+        else:
+            env.pop("MINERU_API_SHUTDOWN_ON_STDIN_EOF", None)
+            stdin_target = subprocess.DEVNULL
         self.output_root.mkdir(parents=True, exist_ok=True)
 
         command = [
@@ -141,7 +259,8 @@ class LocalAPIServer:
             command,
             cwd=os.getcwd(),
             env=env,
-            stdin=subprocess.PIPE,
+            stdin=stdin_target,
+            **build_managed_process_popen_kwargs(),
         )
 
         if not self._atexit_registered:
@@ -153,24 +272,12 @@ class LocalAPIServer:
         process = self.process
         self.process = None
         try:
-            if process is not None and process.poll() is None:
-                if process.stdin is not None and not process.stdin.closed:
-                    process.stdin.close()
-                try:
-                    process.wait(timeout=LOCAL_API_SHUTDOWN_TIMEOUT_SECONDS)
-                except subprocess.TimeoutExpired:
-                    logger.debug(
-                        "Local mineru-api did not stop after stdin EOF within {}s. Falling back to SIGTERM.",
-                        LOCAL_API_SHUTDOWN_TIMEOUT_SECONDS,
-                    )
-                    process.terminate()
-                    try:
-                        process.wait(timeout=LOCAL_API_SHUTDOWN_TIMEOUT_SECONDS)
-                        return
-                    except subprocess.TimeoutExpired:
-                        pass
-                    process.kill()
-                    process.wait(timeout=LOCAL_API_SHUTDOWN_TIMEOUT_SECONDS)
+            if process is not None:
+                stop_managed_process(
+                    process,
+                    shutdown_timeout_seconds=LOCAL_API_SHUTDOWN_TIMEOUT_SECONDS,
+                    use_stdin_shutdown_watcher=self._use_stdin_shutdown_watcher,
+                )
         finally:
             if self._atexit_registered:
                 try:
