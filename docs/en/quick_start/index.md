@@ -1,5 +1,7 @@
 # Quick Start
 
+Document parsing is a difficult and complex task. In scenarios such as complex layouts, scanned pages, and handwritten content, the parsing results may fall short of expectations. We recommend trying the online demo first to evaluate MinerU's parsing quality and suitability before choosing an appropriate deployment method based on your actual needs.
+If you have **document** samples with unsatisfactory parsing results, feel free to share them in an [issue](https://github.com/opendatalab/MinerU/issues). We will continue improving the parsing capabilities.
 If you encounter any installation issues, please check the [FAQ](../faq/index.md) first.
 
 ## Online Experience
@@ -50,8 +52,8 @@ A WebUI developed based on Gradio, with a simple interface and only core parsing
     </tr> 
     <tr>
       <th>Accuracy<sup>1</sup></th>
-      <td style="text-align:center;">86+</td>
-      <td colspan="4" style="text-align:center;">90+</td>
+      <td style="text-align:center;">85+</td>
+      <td colspan="4" style="text-align:center;">95+</td>
     </tr>
     <tr>
       <th>Operating System</th>
@@ -92,7 +94,7 @@ A WebUI developed based on Gradio, with a simple interface and only core parsing
   </tbody>
 </table>
 
-<sup>1</sup> Accuracy metrics are the End-to-End Evaluation Overall scores from OmniDocBench (v1.5), based on the latest version of `MinerU`.  
+<sup>1</sup> Accuracy metrics are the End-to-End Evaluation Overall scores from OmniDocBench (v1.6), based on the latest version of `MinerU`.  
 <sup>2</sup> Servers compatible with OpenAI API, such as local model servers or remote model services deployed via inference frameworks like `vLLM`/`SGLang`/`LMDeploy`.  
 <sup>3</sup> Linux only supports distributions from 2019 and later.  
 <sup>4</sup> Since the key dependency `ray` does not support Python 3.13 on Windows, only versions 3.10~3.12 are supported.  
@@ -123,6 +125,11 @@ uv pip install -e .[all]
  
 #### Deploy MinerU using Docker
 MinerU provides a convenient Docker deployment method, which helps quickly set up the environment and solve some tricky environment compatibility issues.
+
+> [!TIP]
+> - Docker deployment is only supported on Linux and Windows environments with WSL2 support;
+> - macOS users should refer to the two installation methods above for installation instead of using Docker deployment.
+
 You can get the [Docker Deployment Instructions](./docker_deployment.md) in the documentation.
 
 ---

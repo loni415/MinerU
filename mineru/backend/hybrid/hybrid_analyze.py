@@ -23,6 +23,7 @@ from mineru.backend.vlm.vlm_analyze import (
     aio_predictor_execution_guard,
     predictor_execution_guard,
     _maybe_enable_serial_execution,
+    _get_model_async,
 )
 from mineru.data.data_reader_writer import DataWriter
 from mineru.utils.config_reader import get_device, get_processing_window_size
@@ -31,7 +32,10 @@ from mineru.utils.model_utils import crop_img, get_vram, clean_memory
 from mineru.utils.ocr_utils import get_adjusted_mfdetrec_res, get_ocr_result_list, sorted_boxes, merge_det_boxes, \
     update_det_boxes, OcrConfidence
 from mineru.utils.pdf_classify import classify
-from mineru.utils.pdf_image_tools import load_images_from_pdf_doc
+from mineru.utils.pdf_image_tools import (
+    aio_load_images_from_pdf_bytes_range,
+    load_images_from_pdf_doc,
+)
 from mineru.utils.pdfium_guard import (
     close_pdfium_document,
     get_pdfium_document_page_count,
@@ -678,7 +682,7 @@ async def aio_doc_analyze(
     **kwargs,
 ):
     if predictor is None:
-        predictor = ModelSingleton().get_model(backend, model_path, server_url, **kwargs)
+        predictor = await _get_model_async(backend, model_path, server_url, **kwargs)
     predictor = _maybe_enable_serial_execution(predictor, backend)
 
     device = get_device()
@@ -712,12 +716,11 @@ async def aio_doc_analyze(
         try:
             for window_index, window_start in enumerate(range(0, page_count, effective_window_size or 1)):
                 window_end = min(page_count - 1, window_start + effective_window_size - 1)
-                images_list = load_images_from_pdf_doc(
-                    pdf_doc,
+                images_list = await aio_load_images_from_pdf_bytes_range(
+                    pdf_bytes,
                     start_page_id=window_start,
                     end_page_id=window_end,
                     image_type=ImageType.PIL,
-                    pdf_bytes=pdf_bytes,
                 )
                 try:
                     images_pil_list = [image_dict["img_pil"] for image_dict in images_list]

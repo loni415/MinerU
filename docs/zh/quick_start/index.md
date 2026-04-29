@@ -1,5 +1,7 @@
 # 快速入门
 
+文档解析是困难且复杂的任务，尤其是对于复杂版面、扫描件、手写体等场景，解析结果可能不尽如人意。我们建议您先在线体验评估 MinerU 的解析效果和适用性，再根据实际需求选择合适的部署方式。
+如果您有解析效果不佳的**文档**样例，欢迎提交上传到 [issue](https://github.com/opendatalab/MinerU/issues)，我们会持续优化解析能力。
 如果遇到任何安装问题，请先查询 [FAQ](../faq/index.md) 
 
 ## 在线体验
@@ -50,8 +52,8 @@
     </tr> 
     <tr>
       <th>精度指标<sup>1</sup></th>
-      <td style="text-align:center;">86+</td>
-      <td colspan="4" style="text-align:center;">90+</td>
+      <td style="text-align:center;">85+</td>
+      <td colspan="4" style="text-align:center;">95+</td>
     </tr>
     <tr>
       <th>操作系统</th>
@@ -92,7 +94,7 @@
   </tbody>
 </table>
 
-<sup>1</sup> 精度指标为OmniDocBench (v1.5)的End-to-End Evaluation Overall分数，基于`MinerU`最新版本测试  
+<sup>1</sup> 精度指标为OmniDocBench (v1.6)的End-to-End Evaluation Overall分数，基于`MinerU`最新版本测试  
 <sup>2</sup> 兼容OpenAI API的服务器，如通过`vLLM`/`SGLang`/`LMDeploy`等推理框架部署的本地模型服务器或远程模型服务  
 <sup>3</sup> Linux仅支持2019年及以后发行版  
 <sup>4</sup> 由于关键依赖`ray`未能在windows平台支持Python 3.13，故仅支持至3.10~3.12版本  
@@ -128,6 +130,11 @@ uv pip install -e .[all] -i https://mirrors.aliyun.com/pypi/simple
  
 #### 使用docker部署Mineru
 MinerU提供了便捷的docker部署方式，这有助于快速搭建环境并解决一些棘手的环境兼容问题。
+
+> [!TIP]
+> - Docker 部署仅适用于 Linux，以及支持 WSL2 的 Windows 环境；
+> - macOS 用户请直接参考前面两种方式部署安装，不要使用 Docker 部署。
+
 您可以在文档中获取[Docker部署说明](./docker_deployment.md)。
 
 ---
