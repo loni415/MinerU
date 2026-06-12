@@ -1,24 +1,28 @@
 # Copyright (c) Opendatalab. All rights reserved.
 import copy
-import os
 
 from tqdm import tqdm
 
 from mineru.backend.utils.html_image_utils import replace_inline_table_images
+from mineru.backend.utils.formula_number import optimize_formula_number_blocks
 from mineru.backend.utils.runtime_utils import cross_page_table_merge
-from mineru.utils.config_reader import get_device
-from mineru.backend.pipeline.model_init import AtomModelSingleton
+from mineru.backend.pipeline.model_init import (
+    AtomModelSingleton,
+    run_ocr_inference,
+)
 from mineru.backend.pipeline.para_split import para_split
-from mineru.utils.char_utils import full_to_half
 from mineru.utils.cut_image import cut_image_and_table
 from mineru.utils.enum_class import ContentType, BlockType
 from mineru.utils.title_level_postprocess import apply_title_leveling_to_pdf_info
-from mineru.utils.model_utils import clean_memory
 from mineru.backend.pipeline.pipeline_magic_model import MagicModel
 from mineru.utils.ocr_utils import OcrConfidence, rotate_vertical_crop_if_needed
 from mineru.version import __version__
 from mineru.utils.hash_utils import bytes_md5
-from mineru.utils.pdfium_guard import close_pdfium_document, pdfium_guard
+from mineru.utils.pdfium_guard import close_pdfium_child, close_pdfium_document, pdfium_guard
+from mineru.utils.span_pre_proc import (
+    _clear_post_ocr_fallback,
+    _restore_post_ocr_fallback,
+)
 
 
 def page_model_info_to_page_info(page_model_info, image_dict, page, image_writer, page_index, ocr_enable=False):
@@ -77,20 +81,24 @@ def append_page_model_infos_to_middle_json(
 ):
     for offset, (page_model_info, image_dict) in enumerate(zip(page_model_infos, images_list)):
         page_index = page_start_index + offset
-        with pdfium_guard():
-            page = pdf_doc[page_index]
-        page_info = page_model_info_to_page_info(
-            copy.deepcopy(page_model_info),
-            image_dict,
-            page,
-            image_writer,
-            page_index,
-            ocr_enable=ocr_enable,
-        )
-        if page_info is None:
+        page = None
+        try:
             with pdfium_guard():
-                page_w, page_h = map(int, pdf_doc[page_index].get_size())
-            page_info = make_page_info_dict([], page_index, page_w, page_h, [])
+                page = pdf_doc[page_index]
+            page_info = page_model_info_to_page_info(
+                copy.deepcopy(page_model_info),
+                image_dict,
+                page,
+                image_writer,
+                page_index,
+                ocr_enable=ocr_enable,
+            )
+            if page_info is None:
+                with pdfium_guard():
+                    page_w, page_h = map(int, page.get_size())
+                page_info = make_page_info_dict([], page_index, page_w, page_h, [])
+        finally:
+            close_pdfium_child(page)
         middle_json["pdf_info"].append(page_info)
         if progress_bar is not None:
             progress_bar.update(1)
@@ -128,15 +136,6 @@ def append_batch_results_to_middle_json(
     )
 
 
-def _extract_text_from_block(block):
-    text_parts = []
-    for line in block.get("lines", []):
-        for span in line.get("spans", []):
-            if span.get("type") == ContentType.TEXT:
-                text_parts.append(span.get("content", ""))
-    return "".join(text_parts).strip()
-
-
 def _iter_block_spans(block):
     for line in block.get("lines", []):
         for span in line.get("spans", []):
@@ -144,61 +143,6 @@ def _iter_block_spans(block):
 
     for sub_block in block.get("blocks", []):
         yield from _iter_block_spans(sub_block)
-
-
-def _normalize_formula_tag_content(tag_content):
-    tag_content = full_to_half(tag_content.strip())
-    if tag_content.startswith("("):
-        tag_content = tag_content[1:].strip()
-    if tag_content.endswith(")"):
-        tag_content = tag_content[:-1].strip()
-    return tag_content
-
-
-def _get_interline_equation_span(block):
-    for line in block.get("lines", []):
-        for span in line.get("spans", []):
-            if span.get("type") == ContentType.INTERLINE_EQUATION:
-                return span
-    return None
-
-
-def _append_formula_number_tag(equation_block, formula_number_block):
-    equation_span = _get_interline_equation_span(equation_block)
-    tag_content = _normalize_formula_tag_content(_extract_text_from_block(formula_number_block))
-    if equation_span is not None:
-        formula = equation_span.get("content", "")
-        equation_span["content"] = f"{formula}\\tag{{{tag_content}}}"
-
-
-def _optimize_formula_number_blocks(pdf_info_list):
-    for page_info in pdf_info_list:
-        optimized_blocks = []
-        blocks = page_info.get("preproc_blocks", [])
-        for index, block in enumerate(blocks):
-            if block.get("type") != BlockType.FORMULA_NUMBER:
-                optimized_blocks.append(block)
-                continue
-
-            prev_block = blocks[index - 1] if index > 0 else None
-            if prev_block and prev_block.get("type") == BlockType.INTERLINE_EQUATION:
-                _append_formula_number_tag(prev_block, block)
-                continue
-
-            next_block = blocks[index + 1] if index + 1 < len(blocks) else None
-            next_next_block = blocks[index + 2] if index + 2 < len(blocks) else None
-            if (
-                next_block
-                and next_block.get("type") == BlockType.INTERLINE_EQUATION
-                and (next_next_block is None or next_next_block.get("type") != BlockType.FORMULA_NUMBER)
-            ):
-                _append_formula_number_tag(next_block, block)
-                continue
-
-            block["type"] = BlockType.TEXT
-            optimized_blocks.append(block)
-
-        page_info["preproc_blocks"] = optimized_blocks
 
 
 def _apply_post_ocr(pdf_info_list, lang=None):
@@ -231,7 +175,9 @@ def _apply_post_ocr(pdf_info_list, lang=None):
         det_db_box_thresh=0.3,
         lang=lang
     )
-    ocr_res_list = ocr_model.ocr(img_crop_list, det=False, tqdm_enable=True)[0]
+    ocr_res_list = run_ocr_inference(
+        ocr_model.ocr, img_crop_list, det=False, tqdm_enable=True
+    )[0]
     assert len(ocr_res_list) == len(
         need_ocr_list), f'ocr_res_list: {len(ocr_res_list)}, need_ocr_list: {len(need_ocr_list)}'
     for index, span in enumerate(need_ocr_list):
@@ -239,6 +185,9 @@ def _apply_post_ocr(pdf_info_list, lang=None):
         if ocr_score > OcrConfidence.min_confidence:
             span['content'] = ocr_text
             span['score'] = float(f"{ocr_score:.3f}")
+            _clear_post_ocr_fallback(span)
+        elif _restore_post_ocr_fallback(span):
+            continue
         else:
             span['content'] = ''
             span['score'] = 0.0
@@ -266,7 +215,7 @@ def apply_server_side_postprocess(pdf_info_list, lang=None):
 
 def finalize_middle_json_from_preproc(pdf_info_list):
     """从 preproc_blocks 执行确定性 finalize，供服务端完整路径和客户端复用。"""
-    _optimize_formula_number_blocks(pdf_info_list)
+    optimize_formula_number_blocks(pdf_info_list)
     para_split(pdf_info_list)
     cross_page_table_merge(pdf_info_list)
     apply_title_leveling_to_pdf_info(pdf_info_list)
@@ -280,8 +229,6 @@ def finalize_middle_json(
     """Apply document-level post processing once all page_info entries are ready."""
     apply_server_side_postprocess(pdf_info_list, lang=lang)
     finalize_middle_json_from_preproc(pdf_info_list)
-    if os.getenv('MINERU_DONOT_CLEAN_MEM') is None and len(pdf_info_list) >= 10:
-        clean_memory(get_device())
 
 
 def init_middle_json():
