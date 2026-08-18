@@ -149,7 +149,9 @@ echo "[2/4] Detecting suspicious outputs for VLM re-run..." | tee -a "$RUN_SUMMA
 #  - Presence of replacement chars / common garble markers
 #  - Very low Chinese char ratio in Chinese-target docs
 #
-# We keep this in python for robust text handling.
+# Export variables so inline Python script can access them via os.environ
+export PDF_LIST HYBRID_OUT FLAGGED_LIST
+
 python3 - <<'PY'
 import os, re, sys, json
 
