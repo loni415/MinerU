@@ -255,14 +255,16 @@ echo "" | tee -a "$RUN_SUMMARY"
 echo "[4/4] Merging final outputs (VLM overrides hybrid for flagged docs)..." | tee -a "$RUN_SUMMARY"
 
 # Start with hybrid outputs
-rsync -a --delete "$HYBRID_OUT"/ "$FINAL_OUT"/
+rm -rf "$FINAL_OUT" && mkdir -p "$FINAL_OUT"
+cp -a "$HYBRID_OUT"/. "$FINAL_OUT"/ 2>/dev/null || true
 
 # Override with VLM outputs for flagged docs (if available)
 if [[ "$FLAGGED_COUNT" -gt 0 ]]; then
   while IFS= read -r pdf; do
     doc_name="$(basename "$pdf" .pdf)"
     if [[ -d "${VLM_OUT}/${doc_name}" ]]; then
-      rsync -a --delete "${VLM_OUT}/${doc_name}/" "${FINAL_OUT}/${doc_name}/"
+      rm -rf "${FINAL_OUT}/${doc_name}"
+      cp -a "${VLM_OUT}/${doc_name}" "${FINAL_OUT}/${doc_name}"
     fi
   done < "$FLAGGED_LIST"
 fi
