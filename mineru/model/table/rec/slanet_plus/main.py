@@ -1,5 +1,5 @@
+from typing import Any
 # Copyright (c) Opendatalab. All rights reserved.
-import os
 import copy
 import time
 import html
@@ -7,15 +7,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-import cv2
 import numpy as np
 from loguru import logger
 from tqdm import tqdm
 
+from ....ocr.image import rgb_to_bgr
+from ....registry import small_model_repo
 from .matcher import TableMatch
 from .table_structure import TableStructurer
-from mineru.utils.enum_class import ModelPath
-from mineru.utils.models_download_utils import auto_download_and_get_model_root_path
 
 
 @dataclass
@@ -151,19 +150,15 @@ def escape_html(input_string):
 
 
 class PaddleTableModel(object):
-    def __init__(self, ocr_engine):
-        slanet_plus_model_path = os.path.join(
-            auto_download_and_get_model_root_path(ModelPath.slanet_plus),
-            ModelPath.slanet_plus,
-        )
-        input_args = PaddleTableInput(
-            model_type="slanet_plus", model_path=slanet_plus_model_path
-        )
+    def __init__(self, ocr_engine: Any, *, model_path: str | None = None) -> None:
+        """加载所选模型栈的无线表格资源并共享其 OCR 引擎。"""
+        slanet_plus_model_path = model_path or str(small_model_repo().slanet_plus.ensure())
+        input_args = PaddleTableInput(model_type="slanet_plus", model_path=slanet_plus_model_path)
         self.table_model = PaddleTable(input_args)
         self.ocr_engine = ocr_engine
 
     def predict(self, image, ocr_result=None):
-        bgr_image = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+        bgr_image = rgb_to_bgr(np.asarray(image))
         # Continue with OCR on potentially rotated image
 
         if ocr_result is None:
@@ -192,7 +187,7 @@ class PaddleTableModel(object):
         with tqdm(total=len(table_res_list), desc="Table-wireless Predict") as pbar:
             for index in range(0, len(table_res_list), batch_size):
                 batch_imgs = [
-                    cv2.cvtColor(np.asarray(table_res_list[i]["table_img"]), cv2.COLOR_RGB2BGR)
+                    rgb_to_bgr(np.asarray(table_res_list[i]["table_img"]))
                     for i in range(index, min(index + batch_size, len(table_res_list)))
                 ]
                 batch_ocrs = [

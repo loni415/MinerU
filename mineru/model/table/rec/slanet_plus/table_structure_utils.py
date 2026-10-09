@@ -11,56 +11,45 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
+
+from docvortex.image import resize_image
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
-import cv2
 import numpy as np
-from onnxruntime import (
-    GraphOptimizationLevel,
-    InferenceSession,
-    SessionOptions,
-    get_available_providers,
-)
-
 from loguru import logger
-from ..onnxruntime_provider import build_table_onnx_providers
+from onnxruntime import GraphOptimizationLevel, SessionOptions
+
+from ....runtime.onnx import configure_ort_threads, table_ort_session
 
 
 class OrtInferSession:
     def __init__(self, config: Dict[str, Any]):
+        """保留原有会话选项，并使用统一的表格设备与回退策略。"""
         self.logger = logger
 
         model_path = config.get("model_path", None)
         self._verify_model(model_path)
 
-        self.had_providers: List[str] = get_available_providers()
-        EP_list = self._get_ep_list()
-
-        sess_opt = self._init_sess_opts(config)
-        self.session = InferenceSession(
+        self.session = table_ort_session(
             model_path,
-            sess_options=sess_opt,
-            providers=EP_list,
+            sess_options=self._init_sess_opts(config),
         )
 
     @staticmethod
     def _init_sess_opts(config: Dict[str, Any]) -> SessionOptions:
+        """保留表格内存选项，线程数交给共享策略处理。"""
         sess_opt = SessionOptions()
         sess_opt.log_severity_level = 4
         sess_opt.enable_cpu_mem_arena = False
         sess_opt.graph_optimization_level = GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        cpu_nums = os.cpu_count()
-        intra_op_num_threads = config.get("intra_op_num_threads", -1)
-        if intra_op_num_threads != -1 and 1 <= intra_op_num_threads <= cpu_nums:
-            sess_opt.intra_op_num_threads = intra_op_num_threads
-
-        inter_op_num_threads = config.get("inter_op_num_threads", -1)
-        if inter_op_num_threads != -1 and 1 <= inter_op_num_threads <= cpu_nums:
-            sess_opt.inter_op_num_threads = inter_op_num_threads
+        configure_ort_threads(
+            sess_opt,
+            intra_op_num_threads=config.get("intra_op_num_threads", 0),
+            inter_op_num_threads=config.get("inter_op_num_threads", 0),
+        )
 
         return sess_opt
 
@@ -68,9 +57,6 @@ class OrtInferSession:
         meta_dict = self.session.get_modelmeta().custom_metadata_map
         content_list = meta_dict[key].splitlines()
         return content_list
-
-    def _get_ep_list(self) -> List[Tuple[str, Dict[str, Any]]]:
-        return build_table_onnx_providers(self.had_providers)
 
     def __call__(self, input_content: List[np.ndarray]) -> np.ndarray:
         input_dict = dict(zip(self.get_input_names(), input_content))
@@ -267,14 +253,10 @@ class TablePreprocess:
         Args:
             params(list): a dict list, used to create some operators
         """
-        assert isinstance(
-            self.pre_process_list, list
-        ), "operator config should be a list"
+        assert isinstance(self.pre_process_list, list), "operator config should be a list"
         ops = []
         for operator in self.pre_process_list:
-            assert (
-                isinstance(operator, dict) and len(operator) == 1
-            ), "yaml format error"
+            assert isinstance(operator, dict) and len(operator) == 1, "yaml format error"
             op_name = list(operator)[0]
             param = {} if operator[op_name] is None else operator[op_name]
             op = eval(op_name)(**param)
@@ -287,9 +269,7 @@ class TablePreprocess:
                 "max_len": self.table_max_len,
             }
         }
-        pad_op = {
-            "PaddingTableImage": {"size": [self.table_max_len, self.table_max_len]}
-        }
+        pad_op = {"PaddingTableImage": {"size": [self.table_max_len, self.table_max_len]}}
         normalize_op = {
             "NormalizeImage": {
                 "std": [0.229, 0.224, 0.225],
@@ -310,13 +290,10 @@ class TablePreprocess:
 
 
 class BatchTablePreprocess:
-
     def __init__(self):
         self.preprocess = TablePreprocess()
 
-    def __call__(
-        self, img_list: List[np.ndarray]
-    ) -> Tuple[List[np.ndarray], List[List[float]]]:
+    def __call__(self, img_list: List[np.ndarray]) -> Tuple[List[np.ndarray], List[List[float]]]:
         """批量处理图像
 
         Args:
@@ -346,12 +323,13 @@ class ResizeTableImage:
         self.infer_mode = infer_mode
 
     def __call__(self, data):
+
         img = data["image"]
         height, width = img.shape[0:2]
         ratio = self.max_len / (max(height, width) * 1.0)
         resize_h = int(height * ratio)
         resize_w = int(width * ratio)
-        resize_img = cv2.resize(img, (resize_w, resize_h))
+        resize_img = resize_image(img, (resize_w, resize_h))
         if self.resize_bboxes and not self.infer_mode:
             data["bboxes"] = data["bboxes"] * ratio
         data["image"] = resize_img
