@@ -63,30 +63,20 @@ fi
 echo "Found $TOTAL_PDFS PDF(s)." | tee -a "$RUN_SUMMARY"
 
 # ------------------------------------------------------------------------------
-# Helper: run MinerU robustly with two common CLI styles
-#  - style A: mineru parse --input ... --output ...
-#  - style B: mineru -p ... -o ... -b ... -m ... -l ...
+# Helper: run MinerU robustly (MinerU 4.x primary, legacy fallback)
 # ------------------------------------------------------------------------------
 run_hybrid() {
   local input_pdf="$1"
   local out_dir="$2"
 
-  # Try modern parse style first
-  if mineru parse \
-      --input "$input_pdf" \
-      --output "$out_dir" \
-      --backend hybrid \
-      --engine hybrid-auto-engine \
-      --effort high \
-      --lang "$LANG_HINT" \
-      --format markdown,json \
-      >> "${LOG_DIR}/hybrid.log" 2>&1; then
-    return 0
+  # MinerU 4.x standard tier with Force OCR
+  if command -v mineru-kit >/dev/null 2>&1; then
+    if mineru-kit parse "$input_pdf" -o "$out_dir" --tier standard --ocr-mode ocr >> "${LOG_DIR}/hybrid.log" 2>&1; then
+      return 0
+    fi
   fi
 
-  # Fallback to short style (aligned with your sample style)
-  # NOTE: Your sample uses -b vlm-engine -m ocr -l ch_server.
-  # For hybrid attempt, we set backend-style arg to hybrid-engine and keep language hint.
+  # Legacy 2.x/3.x fallback
   mineru \
     -p "$input_pdf" \
     -o "$out_dir" \
@@ -100,20 +90,14 @@ run_vlm() {
   local input_pdf="$1"
   local out_dir="$2"
 
-  # Try modern parse style first
-  if mineru parse \
-      --input "$input_pdf" \
-      --output "$out_dir" \
-      --backend vlm \
-      --engine vlm-vllm-engine \
-      --model "$MODEL" \
-      --lang "$LANG_HINT" \
-      --format markdown,json \
-      >> "${LOG_DIR}/vlm.log" 2>&1; then
-    return 0
+  # MinerU 4.x standard/vlm tier with Force OCR
+  if command -v mineru-kit >/dev/null 2>&1; then
+    if mineru-kit parse "$input_pdf" -o "$out_dir" --tier standard --ocr-mode ocr >> "${LOG_DIR}/vlm.log" 2>&1; then
+      return 0
+    fi
   fi
 
-  # Fallback to style from your example
+  # Legacy 2.x/3.x fallback
   mineru \
     -p "$input_pdf" \
     -o "$out_dir" \
